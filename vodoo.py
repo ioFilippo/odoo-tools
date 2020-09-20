@@ -19,6 +19,7 @@ import os
 from os.path import expandvars, expanduser, abspath, realpath
 
 import logging
+
 logging.basicConfig()
 
 
@@ -31,7 +32,6 @@ def err(s):
 
 
 log('\n')
-
 
 HELP = """
     [COMMAND]                                   operation command                                                
@@ -50,21 +50,24 @@ HELP = """
         [-m|--module MODULENAME]                used to set module name if no --filename or -id MODULENAME is not set
         [-f|--filename FILENAME]                if set then searches for -id into this file, no need of --module or -ID MODULE
         [-sid|--source-id SOURCEID]             look for source ID in the xml -f FILENAME
-     
+
 """
 
 EXAMPLES = """
 
-    # Searches for 'test_view' view id in MYMODULE source file and refreshes its content.
+    # Searches for 'test_view' view id in 'mymod' source file and refreshes its content.
     # When -f is not specified, the script looks into its module folder checking its 'view' location from the Odoo DB. 
-    $ vodoo update-record -d testDB -id MYMODULE.test_view
-      
+    $ vodoo update-record -d testDB -id mymod.test_view
+
     # Looks for 'test_view' -id in -f source file and refreshes relative record in the odoo ir.ui.view table.
-    $ vodoo update-record -d testDB -f MYMODULE/views/test_views.xml -id test_view
-    
+    $ vodoo update-record -d testDB -f mymod/views/test_views.xml -id mymod.test_view
+
     # Looks for 'test_view' -id in -f external source file and refreshes relative record in the odoo ir.ui.view table.
-    $ vodoo update-record -d testDB -f /etc/samples/test_views_01.xml -id test_view
-    
+    $ vodoo update-record -d testDB -f /samples/test_views_01.xml -id mymod.test_view
+
+    # Refreshes all views in 'mymod' reading its location from odoo config ADDONS_PATH.
+    $ vodoo update-record -d testDB -c /etc/odoo.conf -id mymod.ALL
+
 """
 
 CMD_UPDATE_RECORD = ['ur', 'upd-rec', 'update-record']
@@ -106,18 +109,19 @@ if __name__ == '__main__':
         log("Version: %s\n" % __version__)
         log("Odoo version: %s \n" % odoo_version)
 
+
     # INFO: shows script usage help info.
     def show_usage():
         log("  Usage:\n\n    odoo-vr [options]\n\n  Options:\n" + HELP)
         log("  Examples:\n" + EXAMPLES)
 
+
     args = sys.argv[1:]
 
-    fatal, fatal_reason = False, ''
+    fatal = False
     arg_cmd = None
     arg_c, arg_f, arg_id, arg_sid, arg_m = None, None, None, None, None
     arg_db, arg_du, arg_dp, arg_db_host, arg_db_port = None, None, None, '127.0.0.1', '5432'
-    force, do_nothing, overwrite = False, False, False
 
     i, max_len = 0, len(args)
 
@@ -189,32 +193,50 @@ if __name__ == '__main__':
             if args[i][0] == '-':
                 err("argument unknown <%s>.\n" % args[i])
                 fatal = True
+                break
             else:
-                # INFO: if there is no argument prefix then it is an operation command.
+                # INFO: if there is no argument prefix then it's an operation command.
                 arg_cmd = args[i]
 
         i += 1
 
     if not fatal:
-        fatal = not arg_db
+
         if not arg_cmd:
             err("operation command not specified.\n")
-            exit(1)
+            fatal = 1
+
+        elif not arg_db:
+            err("missing --database option.\n")
+            fatal = 1
+
         elif arg_cmd in CMD_UPDATE_RECORD:
-            fatal = fatal or not (arg_cmd and arg_db and (arg_f or arg_m) and arg_id)
+            if arg_f and arg_c:
+                err("--filename and --config are mutually exclusive.\n")
+                fatal = 1
+
+            elif arg_f and arg_id == 'ALL':
+                err("cannot use --filename and ALL ids feature.\n")
+                fatal = 1
+
+            elif not arg_m:
+                err("missing module name (use --module or -id MODULENAME.ID).\n")
+                fatal = 1
+
+            elif not arg_id:
+                err("missing record id (use -id ID|MODULENAME.ID).\n")
+                fatal = 1
+
         else:
             err("operation command <%s> unknown.\n" % arg_cmd)
-            exit(1)
+            fatal = 1
 
-        if fatal:
-            err("not enough arguments.\n")
-            exit(1)
-
-    # INFO: no fatal error has to occur.
+    # INFO: no fatal errors occurred.
     if not fatal:
 
         # INFO: suppresses warning on import psycopg2
         import warnings
+
         warnings.filterwarnings("ignore")
 
         import psycopg2
@@ -234,7 +256,6 @@ if __name__ == '__main__':
                     except ImportError:
                         import ConfigParser
 
-
                     def _normalize(path):
                         if not path:
                             return ''
@@ -249,84 +270,81 @@ if __name__ == '__main__':
                     except ConfigParser.NoSectionError:
                         pass
 
-                # INFO: Searches view id into ir_model_data to get related ir_ui_view data.
-                cur.execute("""SELECT id, res_id, model from ir_model_data where name = '%s' and module = '%s'""" %
-                            (arg_id, arg_m,))
-                rows = cur.fetchall()
-                ir_model_data_id = rows and rows[0][0]
-                ir_model_data_res_id = rows and rows[0][1]
-                ir_model_data_model = rows and rows[0][2]
-
-                if not ir_model_data_id:
-                    err("view id not found in Odoo ir_model_data.\n")
-                    exit(1)
-
-                if not (ir_model_data_model in ['ir.ui.view']):
-                    err("model <%s> is not accepted.\n" % ir_model_data_model)
-                    exit(1)
-
-                cur.execute("""SELECT id, arch_fs from ir_ui_view where id = '%s'""" % ir_model_data_res_id)
-                rows = cur.fetchall()
-                ir_ui_view_id = rows and rows[0][0]
-                ir_ui_view_arch_fs = rows and rows[0][1]
-
-                if not ir_ui_view_id:
-                    err("view id not found in <%s> table.\n" % ir_model_data_model)
-                    exit(1)
-                if not rows:
-                    err("view <%s> from module <%s> not found.\n" % (arg_id, arg_m))
-                    exit(1)
-                elif len(rows) > 1:
-                    err("there are more than one view with same name in the DB.\n")
-                    exit(1)
+                if arg_id == 'ALL':
+                    # INFO: searches for all module records id into ir_model_data.
+                    cur.execute(
+                        "SELECT res_id, arch_fs, ir_model_data.name from ir_ui_view, ir_model_data where "
+                        "ir_ui_view.id = ir_model_data.res_id and "
+                        "ir_model_data.module = '%s' and "
+                        "ir_model_data.model = '%s'"
+                        % (arg_m, 'ir.ui.view')
+                    )
+                    rows = cur.fetchall()
                 else:
-                    log("> found ir_model_data: id=%s, res_id=%s, model=%s\n" % (ir_model_data_id, ir_model_data_res_id, ir_model_data_model))
-                    log("> found ir_ui_view: id=%s, arch_fs=%s\n" % (ir_ui_view_id, ir_ui_view_arch_fs))
+                    # INFO: searches for the module record id into ir_model_data.
+                    cur.execute(
+                        "SELECT res_id, arch_fs, ir_model_data.name from ir_ui_view, ir_model_data where "
+                        "ir_ui_view.id = ir_model_data.res_id and "
+                        "ir_model_data.module = '%s' and "
+                        "ir_model_data.model = '%s' and "
+                        "ir_model_data.name = '%s'"
+                        % (arg_m, 'ir.ui.view', arg_id)
+                    )
+                    rows = cur.fetchall()
+
+                # INFO: checks number of occured errors.
+                nerror = 0
+                for row in rows:
+                    ir_ui_view_id = row[0]
+                    ir_ui_view_arch_fs = row[1]
+                    ir_model_data_name = row[2]
 
                     from xml.etree import ElementTree as ET
 
-                    # INFO: priority if the -f option is set to specify XML filename.
-                    #       2nd option is arch_fs from the ir.ui.view.
-                    arg_f = arg_f or ir_ui_view_arch_fs
-                    log('> using file: <%s>.\n' % arg_f)
+                    fn = False
+                    if addons_path:
+                        # INFO: Tries to look for the module thru addons_path.
+                        #       This is when --config has been set.
+                        for pt in addons_path:
+                            fn = os.path.join(pt, ir_ui_view_arch_fs)
+                            if os.path.exists(fn):
+                                break
+                            fn = False
+                    else:
+                        # INFO: if --filename option is set the use it to specify XML filename.
+                        #       Second option is to use directly actual folder + ir_ui_view.arch_fs.
+                        fn = (arg_id != 'ALL' and arg_f) or ir_ui_view_arch_fs
 
                     try:
-                        # INFO: if XML file does not exist then try to look for addons_path.
-                        #       This is the 3rd option if -c has been set.
-                        if not os.path.exists(arg_f) and addons_path:
-                            arg_f = False
-                            for pt in addons_path:
-                                arg_f = os.path.join(pt, ir_ui_view_arch_fs)
-                                if os.path.exists(arg_f):
-                                    break
-
-                        if not arg_f:
+                        if not fn:
                             raise FileNotFoundError
 
-                        XML = ET.parse(arg_f)
+                        XML = ET.parse(fn)
 
                     except FileNotFoundError as NF:
-                        err("file not found <%s>\n" % arg_f)
+                        err("file not found <%s>\n" % fn)
                         log("> have you set xml file path with -f?\n"
                             "> are you under addon folder where module lies?\n"
                             "> have you set -c config so to use addons_path?\n")
-                        exit(1)
+                        nerror += 1
                     except Exception as E:
-                        err("exception parsing file <%s>: %s\n" % (arg_f, E))
-                        exit(1)
+                        err("exception parsing file <%s>: %s\n" % (fn, E))
+                        nerror += 1
                     else:
+                        log("> found: <%s.%s> / using file: <%s>\n" % (arg_m, ir_model_data_name, fn))
+
                         root = XML.getroot()
 
                         # INFO: if --source-id then use it to look for that record snippet in the XML file.
-                        arg_id = arg_sid or arg_id
+                        rid = arg_sid or (arg_id != 'ALL' and arg_id or ir_model_data_name)
 
-                        arch = root.findall(".//record[@id='%s']/field[@name='arch']" % arg_id)
+                        arch = root.findall(".//record[@id='%s']/field[@name='arch']" % rid)
                         if not len(arch):
-                            err("no view found in the XML file.\n")
-                            exit(1)
+                            err("no view found in the XML file <%s>.\n" % fn)
+                            nerror += 1
                         elif len(arch) > 1:
-                            err("there are more than one view with same id (???) in the XML file.\n")
-                            exit(1)
+                            err("there are more than one view with same id (???) in the XML file <%s>.\n" % fn)
+                            nerror += 1
                         else:
                             try:
                                 # INFO: builds the new arch xml to inject directly into target ir_ui_view.
@@ -343,19 +361,32 @@ if __name__ == '__main__':
                                 new_arch = b'<?xml version="1.0"?>\n' + new_arch
                                 new_arch = new_arch.decode('utf-8').replace('"', r'\"').replace('\'', r'\'')
                             except Exception as E:
-                                err("unable refreshing/injecting new data into the view: %s" % E)
-                                exit(1)
+                                err("unable refreshing new data into the view: %s" % E)
+                                nerror += 1
                             else:
                                 try:
                                     # INFO: refreshes/injects new data into target view.
-                                    cur.execute("""UPDATE ir_ui_view SET arch_db = E'%s' where id = '%s'""" %
-                                                (new_arch, ir_model_data_res_id))
+                                    cur.execute("UPDATE ir_ui_view SET arch_db = E'%s' where id = '%s'" %
+                                                (new_arch, ir_ui_view_id))
                                     conn.commit()
                                 except Exception as E:
                                     err("exception querying postgres to update ir_ui_view: %s" % E)
-                                    exit(1)
-                            cur.close()
-                            log("OK: record updated!\n")
+                                    nerror += 1
+                    # log("\n")
+
+                if not rows:
+                    err("ID/s not found in Odoo ir_model_data.\n")
+                    nerror = 1
+
+                cur.close()
+
+                log("\n")
+                if not nerror:
+                    log("OK: record/s updated!\n")
+                else:
+                    err("some errors occured (%d)!\n" % nerror)
+
+                exit(nerror > 0)
 
         except Exception as E:
             err("exception when connecting to the database: %s" % E)
