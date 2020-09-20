@@ -15,6 +15,8 @@ __company__ = "BLUEBYTECH"
 # ----------------------------------------------------------
 
 import sys
+import os
+from os.path import expandvars, expanduser, abspath, realpath
 
 import logging
 logging.basicConfig()
@@ -33,6 +35,7 @@ log('\n')
 
 HELP = """
     [COMMAND]                                   operation command                                                
+    [-c|--config CONFIGFILE]                    config file
     [-d|-db|--database DATABASE]                target odoo database
     [-du|--db-user USER]                        odoo user, defaulted to 'odoo' if not specified
     [-dp|--db-password PASSWORD]                db password for --db-user
@@ -74,7 +77,6 @@ if __name__ == '__main__':
 
         try:
             import odoo
-            import os
 
             # INFO: trick getting odoo version without loading the whole odoo crap.
             if isinstance(odoo.__path__, list):
@@ -112,7 +114,8 @@ if __name__ == '__main__':
     args = sys.argv[1:]
 
     fatal, fatal_reason = False, ''
-    arg_cmd, arg_f, arg_id, arg_sid, arg_m = None, None, None, None, None
+    arg_cmd = None
+    arg_c, arg_f, arg_id, arg_sid, arg_m = None, None, None, None, None
     arg_db, arg_du, arg_dp, arg_db_host, arg_db_port = None, None, None, '127.0.0.1', '5432'
     force, do_nothing, overwrite = False, False, False
 
@@ -127,6 +130,11 @@ if __name__ == '__main__':
         elif args[i] in ['-v', '--version']:
             show_version()
             exit(0)
+
+        elif args[i] in ['-c', '--config']:
+            i += 1
+            if i < max_len:
+                arg_c = args[i]
 
         elif args[i] in ['-f', '--filename']:
             i += 1
@@ -218,9 +226,32 @@ if __name__ == '__main__':
 
             if arg_cmd in CMD_UPDATE_RECORD:
 
+                # INFO: loading addons_path from config file if -c is set.
+                addons_path = []
+                if arg_c:
+                    try:
+                        import configparser as ConfigParser
+                    except ImportError:
+                        import ConfigParser
+
+
+                    def _normalize(path):
+                        if not path:
+                            return ''
+                        return realpath(abspath(expanduser(expandvars(path.strip()))))
+
+                    config = ConfigParser.RawConfigParser()
+                    try:
+                        config.read([arg_c])
+                        addons_path = [_normalize(x) for x in config['options']['addons_path'].split(',')]
+                    except IOError:
+                        pass
+                    except ConfigParser.NoSectionError:
+                        pass
+
                 # INFO: Searches view id into ir_model_data to get related ir_ui_view data.
                 cur.execute("""SELECT id, res_id, model from ir_model_data where name = '%s' and module = '%s'""" %
-                    (arg_id, arg_m,))
+                            (arg_id, arg_m,))
                 rows = cur.fetchall()
                 ir_model_data_id = rows and rows[0][0]
                 ir_model_data_res_id = rows and rows[0][1]
@@ -230,7 +261,7 @@ if __name__ == '__main__':
                     err("view id not found in Odoo ir_model_data.\n")
                     exit(1)
 
-                if not ir_model_data_model in ['ir.ui.view']:
+                if not (ir_model_data_model in ['ir.ui.view']):
                     err("model <%s> is not accepted.\n" % ir_model_data_model)
                     exit(1)
 
@@ -254,14 +285,31 @@ if __name__ == '__main__':
 
                     from xml.etree import ElementTree as ET
 
+                    # INFO: priority if the -f option is set to specify XML filename.
+                    #       2nd option is arch_fs from the ir.ui.view.
                     arg_f = arg_f or ir_ui_view_arch_fs
                     log('> using file: <%s>.\n' % arg_f)
 
                     try:
+                        # INFO: if XML file does not exist then try to look for addons_path.
+                        #       This is the 3rd option if -c has been set.
+                        if not os.path.exists(arg_f) and addons_path:
+                            arg_f = False
+                            for pt in addons_path:
+                                arg_f = os.path.join(pt, ir_ui_view_arch_fs)
+                                if os.path.exists(arg_f):
+                                    break
+
+                        if not arg_f:
+                            raise FileNotFoundError
+
                         XML = ET.parse(arg_f)
+
                     except FileNotFoundError as NF:
                         err("file not found <%s>\n" % arg_f)
-                        log("(have you set full module path with -f or are you under addon folder where module lies?)\n")
+                        log("> have you set xml file path with -f?\n"
+                            "> are you under addon folder where module lies?\n"
+                            "> have you set -c config so to use addons_path?\n")
                         exit(1)
                     except Exception as E:
                         err("exception parsing file <%s>: %s\n" % (arg_f, E))
@@ -269,7 +317,7 @@ if __name__ == '__main__':
                     else:
                         root = XML.getroot()
 
-                        # INFO: if a --view-origin has been set then use this id to look for the snippet in the XML file.
+                        # INFO: if --source-id then use it to look for that record snippet in the XML file.
                         arg_id = arg_sid or arg_id
 
                         arch = root.findall(".//record[@id='%s']/field[@name='arch']" % arg_id)
