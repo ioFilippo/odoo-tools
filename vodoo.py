@@ -26,15 +26,24 @@ import time
 from datetime import datetime, timedelta
 
 import logging
+from urllib.parse import urljoin
 
 logging.basicConfig()
 
+_logger = logging.getLogger(__name__)
 
 try:
     import passlib.context
 except ImportError:
     _logger.warning("Please install passlib package with 'pip install passlib'")
     passlib = None
+
+try:
+    import requests
+except ImportError:
+    _logger.warning("Please install requests package with 'pip install requests'")
+    requests = None
+
 
 class Colors:
     HEADER = '\033[95m'
@@ -340,6 +349,8 @@ def update_view(cr, model_op, model, argv):
     _config = argv.get('config')
     _value = argv.get('value')
     _watch = argv.get('watch')
+    _clear_cache = argv.get('clear-cache')
+    _odoo_host = argv.get('odoo-host', 'http:\\127.0.0.1:8069')
     _arch = model_op == 'arch'
 
     if _module and not _id:
@@ -359,6 +370,10 @@ def update_view(cr, model_op, model, argv):
 
     elif _watch and not _arch:
         err("--watch requires only --arch.\n")
+        exit(1)
+
+    elif _clear_cache and not _odoo_host:
+        err("--clear-cache requires --odoo-host.\n")
         exit(1)
 
     elif _filename and not _arch:
@@ -399,7 +414,7 @@ def update_view(cr, model_op, model, argv):
 
     # INFO: searches for the module record id into ir_model_data.
     cr.execute(
-        "SELECT ir_model_data.id, res_id, type, arch_fs, ir_model_data.name, ir_ui_view.active, ir_model_data.noupdate from ir_ui_view, ir_model_data where "
+        "SELECT ir_model_data.id, res_id, ir_ui_view.model, type, arch_fs, ir_model_data.name, ir_ui_view.active, ir_model_data.noupdate from ir_ui_view, ir_model_data where "
         "ir_ui_view.id = ir_model_data.res_id and "
         "ir_model_data.module = '%s' and "
         "ir_model_data.model = '%s' and "
@@ -417,7 +432,7 @@ def update_view(cr, model_op, model, argv):
 
             class MyHandler(FileSystemEventHandler):
 
-                def __init__(self, module, id, model_data_name, view_id, view_type, source_id, fn):
+                def __init__(self, module, id, model, model_data_name, view_id, view_type, source_id, filename):
                     self.last_modified = datetime.now()
                     self.nwarnings = 0
                     self.nerrors = 0
@@ -425,17 +440,18 @@ def update_view(cr, model_op, model, argv):
                     self.module = module
                     self.id = id
                     self.model_data_name = model_data_name
+                    self.model = model
                     self.view_id = view_id
                     self.view_type = view_type
                     self.source_id = source_id
-                    self.filename = fn
+                    self.filename = filename
 
                 def on_modified(self, event):
                     # if datetime.now() - self.last_modified >= timedelta(seconds=1):
                     if (datetime.now() - self.last_modified >= timedelta(seconds=1)):
-                        if type(
-                                event) == FileModifiedEvent and event.event_type == 'modified' and self.filename == os.path.normpath(
-                            event.src_path):
+                        if type(event) == FileModifiedEvent and \
+                                event.event_type == 'modified' and \
+                                self.filename == os.path.normpath(event.src_path):
                             _ne, _nw, _nc = xml2arch(
                                 self.module,
                                 self.id,
@@ -444,10 +460,11 @@ def update_view(cr, model_op, model, argv):
                                 self.view_type,
                                 self.source_id,
                                 self.filename,
-                                True
                             )
                             if self.ncommits > 0:
                                 cr.connection.commit()
+                                if _clear_cache:
+                                    requests.get(urljoin(_odoo_host, 'clear_cache'), params={'model_name':self.model})
 
                             self.nerrors += _ne
                             self.nwarnings += _nw
@@ -462,14 +479,15 @@ def update_view(cr, model_op, model, argv):
     for row in rows:
         ir_model_data_id = row[0]
         ir_ui_view_id = row[1]
-        ir_ui_view_type = row[2]
-        ir_ui_view_arch_fs = row[3]
-        ir_model_data_name = row[4]
-        ir_ui_view_active = row[5]
-        ir_model_data_noupdate = row[6]
+        ir_ui_view_model = row[2]
+        ir_ui_view_type = row[3]
+        ir_ui_view_arch_fs = row[4]
+        ir_model_data_name = row[5]
+        ir_ui_view_active = row[6]
+        ir_model_data_noupdate = row[7]
 
         # INFO: updates new data into target view.
-        if model_op == 'active' is not None:
+        if model_op == 'active':
             try:
                 log("> found: <%s.%s> / active: %s -> %s\n" % (_module, ir_model_data_name, ir_ui_view_active, str2bool(_value)))
                 cr.execute("UPDATE ir_ui_view SET active = %s where id = %s" %
@@ -479,7 +497,7 @@ def update_view(cr, model_op, model, argv):
                 err("exception querying postgres: %s\n" % E)
                 ne += 1
 
-        elif model_op == 'noupdate' is not None:
+        elif model_op == 'noupdate':
             try:
                 log("> found: <%s.%s> / noupdate: %s -> %s\n" % (_module, ir_model_data_name, ir_model_data_noupdate, str2bool(_value)))
                 cr.execute("UPDATE ir_model_data SET noupdate = %s where id = %s" %
@@ -509,6 +527,7 @@ def update_view(cr, model_op, model, argv):
                 event_handlers += [MyHandler(
                     _module,
                     _id,
+                    ir_ui_view_model,
                     ir_model_data_name,
                     ir_ui_view_id,
                     ir_ui_view_type,
@@ -769,6 +788,11 @@ if __name__ == '__main__':
                 arg_db_host = host[0]
                 if len(host) > 1:
                     arg_db_port = host[1]
+
+        elif args[i] in ['-oh', '--odoo-host']:
+            i += 1
+            if i < max_len:
+                argv['odoo-host'] = args[i]
 
         else:
 
