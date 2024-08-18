@@ -188,6 +188,7 @@ def list_model(cr, model_op, model, argv):
     qry = """
 SELECT
     ir_model_data.module,
+    ir_model_data.name,
     {model_table}.name,
     ir_model_data.model,
     {model_table}.active,
@@ -214,10 +215,10 @@ ORDER BY
 
     cr.execute(qry)
     rows = cr.fetchall()
-    log("{:<25} {:<70} {:<25} {:3} {:5}\n".format('module', 'id', 'model', 'act', 'noupd'))
+    log("{:<20} {:<30} {:<50} {:6} {:5}\n".format('module', 'id', 'name', 'active', 'noupd'))
     log(132*"-" + '\n')
     for r in rows:
-        log("{:<25} {:<70} {:<25}  {:1}    {:1}\n".format(r[0], r[1], r[2], r[3] and 'A' or '', r[4] and 'N' or ''))
+        log("{:<20} {:<30} {:<50}    {:1}      {:1}\n".format(r[0][:20], r[1][:30], r[2][:50], r[4] and 'Y' or '', r[5] and 'N' or ''))
     log('\nTotal views: %d\n' % len(rows))
     return 0, 0, 0
 
