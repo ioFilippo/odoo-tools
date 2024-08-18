@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 
 # TODO:
-#       watch.view              to watch file when changed and update related view
+#   watch.view: to watch file when changed and update related view
+#   send.scancode: to simulate code scanning
 
-__version__ = "0.3.0"
-__author__ = "Filippo Iovine <admin@bluebytech.com>"
-__company__ = "BLUEBYTECH"
+__version__ = "1.0.1"
+__author__ = "Filippo Iovine <filippo.jovine@gmail.com>"
+__company__ = "ME&ONLYME"
 
 # ----------------------------------------------------------
 #
@@ -13,7 +14,7 @@ __company__ = "BLUEBYTECH"
 #
 # Developed by Filippo Iovine
 #
-# 2020 - BLUEBYTECH
+# 2020 - Filippo Iovine
 #
 # ----------------------------------------------------------
 
@@ -53,7 +54,7 @@ def log(s, color=None):
         sys.stdout.flush()
     except (KeyboardInterrupt, BrokenPipeError):
         # INFO: Python flushes standard streams on exit; redirect remaining output
-        #       to devnull to avoid another BrokenPipeError at shutdown
+        #       to devnull to avoid another BrokenPipeError at shutdown.
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, sys.stdout.fileno())
         sys.exit(1)
@@ -97,7 +98,7 @@ def str2bool(s):
 
 
 HELP = """
-    [OPERATION.MODEL[.OBJECT]]                  operation command verb and its target object                                                 
+    [OPERATION.MODEL[.OBJECT]]                  operation command verb and its target object
     [-c|--config CONFIGFILE]                    config file
     [-d|-db|--database DATABASE]                target odoo database
     [-du|--db-user USER]                        odoo user, defaulted to 'odoo' if not specified
@@ -107,7 +108,7 @@ HELP = """
     [-v|--version]                              shows refreshview version info
 
     OPERATION:
-        u|update                                updates OBJECT1 by its ID
+        u|update                                updates OBJECT by its ID
 
         MODEL:
             view                                odoo view record object
@@ -118,7 +119,7 @@ HELP = """
             [-sid|--source-id SOURCEID]         looks for a specific source ID in the xml -f FILENAME (content used to update -id)
             
             OBJECT:
-                active                          updates 'active' attribute of the model with --value.                
+                active                          updates 'active' attribute of the model with --value.
                 noupdate                        updates 'noupdate' attribute of the model with --value.
                 arch                            [DEFAULT] updates 'arch' content of the model by module file in local directory, by --filename & --source-id or by --config.
 
@@ -503,7 +504,7 @@ def update_view(cr, model_op, model, argv):
                     ir_ui_view_id,
                     ir_ui_view_type,
                     _source_id,
-                    os.path.normpath(fn)
+                    os.path.normpath(fn),
                 )]
             else:
                 nw, ne, nc = xml2arch(_module, _id, ir_model_data_name, ir_ui_view_id, ir_ui_view_type, _source_id, fn)
