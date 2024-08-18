@@ -313,7 +313,7 @@ def update_user_password(cr, model_op, model, argv):
 from xml.etree import ElementTree as ET
 
 
-def xml2arch(_module, _id, ir_model_data_name, ir_ui_view_id, ir_ui_view_type, _source_id, fn, watching=False):
+def xml2arch(_module, _id, ir_model_data_name, ir_ui_view_id, ir_ui_view_type, _source_id, fn):
     nw, ne, nc = 0, 0, 0
     try:
         if not fn:
@@ -641,19 +641,19 @@ CMDS = {
         'views': {
             'model': 'ir.ui.view',
             'table': 'ir_ui_view',
-            'need': ['database', 'module'],
+            'requires': ['database', 'module'],
             'call': list_model,
         },
         'users': {
             'model': 'res.users',
             'table': 'res_users',
-            'required': ['database'],
+            'requires': ['database'],
             'call': list_users,
         },
         'fields': {
             'model': 'ir.model.fields',
             'table': 'ir_model_fields',
-            'need': ['database', 'module'],
+            'requires': ['database', 'module'],
             'call': list_model,
         },
     },
@@ -666,7 +666,7 @@ CMDS = {
         'database': {
             'trial': {
                 'call': reset_trial,
-                'need': ['database'],
+                'requires': ['database'],
             },
         },
     },
@@ -675,15 +675,15 @@ CMDS = {
             'model': 'ir.ui.view',
             'table': 'ir_ui_view',
             'arch': {
-                'need': ['database'],
+                'requires': ['database'],
                 'call': update_view,
             },
             'active': {
-                'need': ['database', 'value'],
+                'requires': ['database', 'value'],
                 'call': update_view,
             },
             'noupdate': {
-                'need': ['database', 'value'],
+                'requires': ['database', 'value'],
                 'call': update_view,
             }
         },
@@ -691,7 +691,7 @@ CMDS = {
             'password': {
                 'warning': "Be sure there is no overridden or inherited auth flows in your Odoo code.",
                 'confirmation': True,
-                'need': ['database', 'user', 'password'],
+                'requires': ['database', 'user', 'password'],
                 'call': update_user_password,
             }
         }
@@ -914,7 +914,7 @@ if __name__ == '__main__':
             # model = model.get(cmd_object, model)
 
             call_operation = model and model.get('call')
-            fatal = model and model.get('need') and check_needed_args(model.get('need'))
+            fatal = model and model.get('requires') and check_needed_args(model.get('requires'))
 
             if not call_operation:
                 err("operation command <%s> unknown.\n" % arg_cmd)
