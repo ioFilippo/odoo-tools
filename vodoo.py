@@ -755,6 +755,11 @@ if __name__ == '__main__':
 
     i, max_len = 0, len(args)
 
+    # INFO: defaults to --help when vodoo has been launched without params.
+    if not max_len:
+        show_usage()
+        exit(0)
+
     while i < max_len:
 
         if args[i] in ['-h', '--help']:
