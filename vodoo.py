@@ -30,6 +30,12 @@ import logging
 logging.basicConfig()
 
 
+try:
+    import passlib.context
+except ImportError:
+    _logger.warning("Please install passlib package with 'pip install passlib'")
+    passlib = None
+
 class Colors:
     HEADER = '\033[95m'
     OK = '\033[92m'
@@ -149,9 +155,7 @@ EXAMPLES = """
 """
 
 
-import passlib.context
-
-DEFAULT_CRYPT_CONTEXT = passlib.context.CryptContext(
+DEFAULT_CRYPT_CONTEXT = passlib and passlib.context.CryptContext(
     # kdf which can be verified by the context. The default encryption kdf is
     # the first of the list
     ['pbkdf2_sha512', 'plaintext'],
@@ -219,6 +223,10 @@ ORDER BY
 
 
 def update_user_password(cr, model_op, model, argv):
+    if not DEFAULT_CRYPT_CONTEXT:
+        err('passlib module not found!\n')
+        return 0, 1, 0
+
     _user = argv.get('user')
     _pw = argv.get('password')
 
