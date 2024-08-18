@@ -232,6 +232,53 @@ ORDER BY
     return 0, 0, 0
 
 
+def list_users(cr, model_op, model, argv):
+    model_name = model.get('model')
+    model_table = model.get('table')
+    _id = argv.get('id')
+    _login = argv.get('login')
+    _order_by = argv.get('order-by') or 'id'
+
+    _order_by_list = _order_by.split(',')
+    _order_by_filtered = list(filter(lambda a: a in ['id', 'login'], _order_by_list))
+    if len(_order_by_list) != len(_order_by_filtered):
+        err('Wrong --order-by clause.\n')
+        return 0, 1, 0
+
+    qry = """
+SELECT
+    id,
+    active,
+    login
+FROM
+    {model_table}
+{where}
+ORDER BY
+    {orderby}
+"""
+
+    # INFO: 'where' clause.
+    _where = ''
+    if _id:
+        _where = "id = %s AND " % _id
+    if _login:
+        _where += "login ilike %s AND " % _login
+    if _where:
+        _where = "WHERE " + _where
+
+    qry = qry.format(model_table=model_table, where=_where, orderby=_order_by)
+    log(qry)
+
+    cr.execute(qry)
+    rows = cr.fetchall()
+    log("{:<10} {:<10} {:<25}\n".format('id', 'active', 'login'))
+    log(80*"-" + '\n')
+    for r in rows:
+        log("{:<10} {:<10} {:<25}\n".format(r[0], r[1] and 'A' or '', r[2]))
+    log('\nTotal records: %d\n' % len(rows))
+    return 0, 0, 0
+
+
 def update_user_password(cr, model_op, model, argv):
     if not DEFAULT_CRYPT_CONTEXT:
         err('passlib module not found!\n')
@@ -597,11 +644,22 @@ CMDS = {
             'need': ['database', 'module'],
             'call': list_model,
         },
+        'users': {
+            'model': 'res.users',
+            'table': 'res_users',
+            'required': ['database'],
+            'call': list_users,
+        },
         'fields': {
             'model': 'ir.model.fields',
             'table': 'ir_model_fields',
             'need': ['database', 'module'],
             'call': list_model,
+        },
+    },
+    'show': {
+        'users': {
+            'alias': 'list.users'
         },
     },
     'reset': {
