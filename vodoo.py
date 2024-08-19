@@ -760,8 +760,6 @@ if __name__ == '__main__':
 
     # INFO: shows script and odoo version info.
     def show_version():
-        odoo_version = None
-
         try:
             import odoo
 
@@ -781,7 +779,7 @@ if __name__ == '__main__':
 
             vn = float(odoo_version)
 
-            if vn < 10 or vn > 14:
+            if vn < 10 or vn > 17:
                 err("odoo version not supported!\n")
                 exit(1)
 
