@@ -108,44 +108,40 @@ def boxed(s, title, char='-'):
 def str2bool(s):
     v = s.lower()
     if v not in ['true', 'false', '1', '0', 't', 'f']:
-        raise ValueError("<%s> is not a valid value." % v)
+        raise ValueError("<%s> is not a valid value" % v)
     return v in ['true', '1']
 
 
 HELP = """
-    [OPERATION.MODEL[.OBJECT]]                  operation command verb and its target object
-    [-c|--config CONFIGFILE]                    config file
-    [-d|-db|--database DATABASE]                target odoo database
-    [-du|--db-user USER]                        odoo user, defaulted to 'odoo' if not specified
-    [-dp|--db-password PASSWORD]                db password for --db-user
-    [-dh|--db-host HOST]                        db host if not set then localhost
-    [-h|--help]                                 shows usage information
-    [-v|--version]                              shows refreshview version info
+    [OPERATION.OBJECT[.ATTRS]]                      operation command verb and its target object
+    [-c|--config CONFIGFILE]                        config file
+    [-d|-db|--database DATABASE]                    target odoo database
+    [-du|--db-user USER]                            odoo user, defaulted to 'odoo' if not specified
+    [-dp|--db-password PASSWORD]                    db password for --db-user
+    [-dh|--db-host HOST]                            db host if not set then localhost
+    [-h|--help]                                     shows usage information
+    [-v|--version]                                  shows refreshview version info
 
-    OPERATION:
-        u|update                                updates OBJECT by its ID
+    Operations specific arguments:
+        [-m|--module MODULENAME]                    module name (mutually exclusive with --filename, -id)
+        [-id ID|XML_ID]                             record id or External Odoo ID to identify Odoo object
+        [-fn|--filename FILENAME]                   searches for -id into this file
+        [-sid|--source-id SOURCEID]                 looks for a specific source ID in the xml -f FILENAME (content used to update -id)
+        [-w|--watch]                                activates watcher to run operation when file/s change/s
+        [--clear-cache]
+        [-oh|--odoo-host]
+        [-u|--user]                                 user login name
+        [-pw|--password PASSWORD]                   new password
 
-        MODEL:
-            view                                odoo view record object
-        arguments: 
-            [-m|--module MODULENAME]            used to set module name if no --filename or -id MODULENAME is not set
-            [-id ID|MODULENAME.ID]              record id to update, if MODULENAME.ID then no need to specify --module
-            [-fn|--filename FILENAME]           if set then searches for -id into this file, no need of --module or -id MODULE
-            [-sid|--source-id SOURCEID]         looks for a specific source ID in the xml -f FILENAME (content used to update -id)
-            
-            OBJECT:
-                active                          updates 'active' attribute of the model with --value.
-                noupdate                        updates 'noupdate' attribute of the model with --value.
-                arch                            [DEFAULT] updates 'arch' content of the model by module file in local directory, by --filename & --source-id or by --config.
-
-        MODEL:
-            user                                odoo user record object
-
-            OBJECT:
-                password                        resets user password
-            arguments:
-                [-u|--user]                     user login name
-                [-pw|--password PASSWORD]       new password
+    Operations:
+        list.fields                                 shows fields (-m)
+        list.users                                  shows all available users
+        list.views                                  shows all available views (-m, -id)
+        set.noupdate                                updates 'noupdate' attribute to --value (-m, -id)
+        set.user.password                           updates user password (-u, -pw)
+        set.view.arch                               updates 'arch' content (-m, -id, -fn, -sid)
+        set.view.active                             updates 'active' attribute with --value (-m, -id)
+        reset.database.trial                        resets database trial info from --database
 """
 
 EXAMPLES = """
@@ -196,19 +192,18 @@ def list_model(cr, model_op, model, argv):
 
     qry = """
 SELECT
-    ir_model_data.module,
-    ir_model_data.name,
-    {model_table}.name,
-    ir_model_data.model,
-    {model_table}.active,
-    ir_model_data.noupdate
+    imd.module,
+    imd.name,
+    t.name,
+    imd.model,
+    imd.noupdate
 FROM
-    ir_model_data,
-    {model_table}
+    ir_model_data as imd,
+    {model_table} as t
 WHERE
     {where}
-    ir_model_data.model = '{model_name}' AND
-    ir_model_data.res_id = {model_table}.id
+    imd.model = '{model_name}' AND
+    imd.res_id = {model_table}.id
 ORDER BY
     {orderby}
 """
@@ -221,14 +216,13 @@ ORDER BY
         _where += "ir_model_data.module ilike '%s' AND " % _module
 
     qry = qry.format(model_name=model_name, model_table=model_table, where=_where, orderby=_order_by)
-
     cr.execute(qry)
     rows = cr.fetchall()
-    log("{:<20} {:<30} {:<50} {:6} {:5}\n".format('module', 'id', 'name', 'active', 'noupd'))
+    log("{:<20} {:<50} {:<50} {:5}\n".format('module', 'id', 'name', 'noupd'))
     log(132*"-" + '\n')
     for r in rows:
-        log("{:<20} {:<30} {:<50}    {:1}      {:1}\n".format(r[0][:20], r[1][:30], r[2][:50], r[4] and 'Y' or '', r[5] and 'N' or ''))
-    log('\nTotal views: %d\n' % len(rows))
+        log("{:<20} {:<50} {:<50}  {:1}  \n".format(r[0][:20], r[1][:50], r[2][:50], r[4] and 'N' or ''))
+    log(f'\nTotal objects: {len(rows)} (model: {model_name})\n')
     return 0, 0, 0
 
 
@@ -397,18 +391,18 @@ def update_view(cr, model_op, model, argv):
     _value = argv.get('value')
     _watch = argv.get('watch')
     _clear_cache = argv.get('clear-cache')
-    _odoo_host = argv.get('odoo-host', 'http:\\127.0.0.1:8069')
+    _odoo_host = argv.get('odoo-host', 'http://127.0.0.1:8069')
     _arch = model_op == 'arch'
 
     if _module and not _id:
         _id = '%'
 
     if not _id:
-        err("missing ID or module name (use -m|--module MODULENAME or -id MODULENAME.ID).\n")
+        err("missing ID or module name (use -m|--module MODULENAME or -id MODULENAME.ID)\n")
         exit(1)
 
     elif _filename and _config:
-        err("--filename and --config are mutually exclusive.\n")
+        err("--filename and --config are mutually exclusive\n")
         exit(1)
 
     # elif _filename and _id == '%':
@@ -416,23 +410,23 @@ def update_view(cr, model_op, model, argv):
     #     exit(1)
 
     elif _watch and not _arch:
-        err("--watch requires only --arch.\n")
+        err("--watch only when running set.view.arch\n")
         exit(1)
 
     elif _clear_cache and not _odoo_host:
-        err("--clear-cache requires --odoo-host.\n")
+        err("--clear-cache requires --odoo-host\n")
         exit(1)
 
     elif _filename and not _arch:
-        err("--filename requires only --arch.\n")
+        err("--filename only when running update.view\n")
         exit(1)
 
     elif _source_id and not _filename:
-        err("--source-id requires only --filename.\n")
+        err("--source-id requires --filename\n")
         exit(1)
 
     elif not _module:
-        err(".\n")
+        err("\n")
         exit(1)
 
     # elif not arg_arch and arg_active is None and arg_noupdate is None:
@@ -460,13 +454,16 @@ def update_view(cr, model_op, model, argv):
             pass
 
     # INFO: searches for the module record id into ir_model_data.
-    cr.execute(
-        "SELECT ir_model_data.id, res_id, ir_ui_view.model, type, arch_fs, ir_model_data.name, ir_ui_view.active, ir_model_data.noupdate from ir_ui_view, ir_model_data where "
-        "ir_ui_view.id = ir_model_data.res_id and "
-        "ir_model_data.module = '%s' and "
-        "ir_model_data.model = '%s' and "
-        "ir_model_data.name ilike '%s'"
-        % (_module, 'ir.ui.view', _id)
+    cr.execute("""SELECT
+        imd.id, res_id, imd.model, type, arch_fs, imd.name, iuv.active, imd.noupdate
+    FROM
+        ir_ui_view as iuv, ir_model_data as imd
+    WHERE
+        iuv.id = imd.res_id and
+        imd.module = %s and
+        imd.model = %s and
+        imd.name ilike %s""",
+        [_module, 'ir.ui.view', _id]
     )
     rows = cr.fetchall()
 
@@ -548,7 +545,7 @@ def update_view(cr, model_op, model, argv):
             try:
                 log("> found: <%s.%s> / noupdate: %s -> %s\n" % (_module, ir_model_data_name, ir_model_data_noupdate, str2bool(_value)))
                 cr.execute("UPDATE ir_model_data SET noupdate = %s where id = %s" %
-                           (str2bool(_active), ir_model_data_id))
+                           (str2bool(_value), ir_model_data_id))
                 nc += 1
             except Exception as E:
                 err("exception querying postgres: %s\n" % E)
@@ -635,12 +632,9 @@ def reset_trial(cr, model_op, model, argv):
 
 CMDS = {
     'list': {
-        'view': {
-            'alias': 'list.views'
-        },
-        'views': {
-            'model': 'ir.ui.view',
-            'table': 'ir_ui_view',
+        'fields': {
+            'model': 'ir.model.fields',
+            'table': 'ir_model_fields',
             'requires': ['database', 'module'],
             'call': list_model,
         },
@@ -650,22 +644,21 @@ CMDS = {
             'requires': ['database'],
             'call': list_users,
         },
-        'fields': {
-            'model': 'ir.model.fields',
-            'table': 'ir_model_fields',
+        'view': {
+            'alias': 'list.views',
+            'requires': ['id'],
+        },
+        'views': {
+            'model': 'ir.ui.view',
+            'table': 'ir_ui_view',
             'requires': ['database', 'module'],
             'call': list_model,
-        },
-    },
-    'show': {
-        'users': {
-            'alias': 'list.users'
         },
     },
     'reset': {
         'database': {
             'trial': {
-                'call': reset_trial,
+                'call': reset_database_trial,
                 'requires': ['database'],
             },
         },
@@ -695,6 +688,11 @@ CMDS = {
                 'call': update_user_password,
             }
         }
+    },
+    'show': {
+        'users': {
+            'alias': 'list.users'
+        },
     },
 }
 
@@ -843,6 +841,10 @@ if __name__ == '__main__':
             i += 1
             if i < max_len:
                 arg_dp = args[i]
+
+
+        elif args[i] in ['-cc', '--clear-cache']:
+            argv['clear-cache'] = True
 
         elif args[i] in ['-dh', '--db-host']:
             i += 1
