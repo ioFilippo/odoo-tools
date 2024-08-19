@@ -955,25 +955,19 @@ if __name__ == '__main__':
                 return cmds[0], (len(cmds) > 1) and cmds[1] or None, (len(cmds) > 2) and cmds[2] or None
 
             cmd, cmd_model, cmd_object = arg2cmd(arg_cmd)
-            # model_name = arg_cmd[1]
-            # model = CMDS.get(arg_cmd[0], {}).get(model_name, {})
             model = CMDS.get(cmd, {}).get(cmd_model, {})
-            # if model.get('alias'):
-            #     cmd, cmd_model, cmd_object = arg2cmd(model.get('alias'))
-            #     model = CMDS.get(cmd, {}).get(cmd_model, {})
-
-            # if cmd_object:
-
             model = model.get(cmd_object, model)
             model_op = cmd_object or cmd_model
-            if model and model.get('alias'):
-                cmd, cmd_model, cmd_object = arg2cmd(model.get('alias'))
-                model = CMDS.get(cmd, {}).get(cmd_model, {})
 
-            # model = model.get(cmd_object, model)
+            if isinstance(model, dict):
+                if model.get('alias'):
+                    cmd, cmd_model, cmd_object = arg2cmd(model.get('alias'))
+                    alias_model = CMDS.get(cmd, {}).get(cmd_model, {})
+                    alias_model.get("requires", []).extend(model.get("requires"))
+                    model = alias_model
 
-            call_operation = model and model.get('call')
-            fatal = model and model.get('requires') and check_needed_args(model.get('requires'))
+                call_operation = model.get('call')
+                fatal = model.get('requires') and check_needed_args(model.get('requires'))
 
             if not call_operation:
                 err("operation command <%s> unknown.\n" % arg_cmd)
