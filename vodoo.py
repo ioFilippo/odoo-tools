@@ -617,7 +617,57 @@ def update_view(cr, model_op, model, argv):
     return nw, ne, nc
 
 
-def reset_trial(cr, model_op, model, argv):
+def set_value(cr, model_op, model, argv):
+    model_name = model.get('model')
+    model_table = model.get('table')
+    _module = argv.get('module')
+    _id = argv.get('id')
+    value = argv.get('value')
+
+    if not _id:
+        err("missing ID (-id ID|XML_ID)\n")
+        exit(1)
+
+    # INFO: searches for the module record id into ir_model_data.
+    cr.execute("""SELECT id, name, res_id, model, noupdate
+        FROM ir_model_data as imd
+        WHERE module = %s AND name = %s""",
+        [_module, _id],
+    )
+    rows = cr.fetchall()
+
+    # INFO: checks number of occurred errors.
+    ne, nc = 0, 0
+    for row in rows:
+        d_id, d_name, d_res_id, d_model, d_noupdate = row
+
+        try:
+            if model_op == 'active':
+                if d_model != model_name:
+                    err("model mismatch: %s != %s\n" % (d_model, model_name))
+                    ne += 1
+                    continue
+                _value = str2bool(value)
+                log(f"Setting 'active' to {str(_value)} for {_module}.{_id}\n")
+                cr.execute(f"UPDATE {model_table} SET active = %s WHERE id = %s", [_value, d_res_id])
+                nc += 1
+            else:
+                _value = str2bool(value)
+                log("> found: <%s.%s> / noupdate: %s -> %s\n" % (_module, d_name, d_noupdate, str(_value)))
+                cr.execute("UPDATE ir_model_data SET noupdate = %s WHERE id = %s", [_value, d_id])
+                nc += 1
+        except Exception as E:
+            err("exception querying postgres: %s\n" % E)
+            ne += 1
+
+    if not rows:
+        err("ID not found in Odoo ir_model_data.\n")
+        ne = 1
+
+    return 0, ne, nc
+
+
+def reset_database_trial(cr, model_op, model, argv):
     _db = argv.get('database')
 
     log('Resetting trial for database <%s>.\n' % _db)
@@ -663,31 +713,35 @@ CMDS = {
             },
         },
     },
-    'update': {
-        'view': {
-            'model': 'ir.ui.view',
-            'table': 'ir_ui_view',
-            'arch': {
-                'requires': ['database'],
-                'call': update_view,
-            },
-            'active': {
-                'requires': ['database', 'value'],
-                'call': update_view,
-            },
-            'noupdate': {
-                'requires': ['database', 'value'],
-                'call': update_view,
-            }
-        },
+    'set': {
         'user': {
             'password': {
-                'warning': "Be sure there is no overridden or inherited auth flows in your Odoo code.",
+                'warning': "Be sure there is no overridden or inherited auth flows in your Odoo code",
                 'confirmation': True,
                 'requires': ['database', 'user', 'password'],
                 'call': update_user_password,
             }
-        }
+        },
+        'view': {
+            'active': {
+                'model': 'ir.ui.view',
+                'table': 'ir_ui_view',
+                'requires': ['database', 'value'],
+                'call': set_value,
+            },
+            'arch': {
+                'model': 'ir.ui.view',
+                'table': 'ir_ui_view',
+                'requires': ['database'],
+                'call': update_view,
+            },
+            'noupdate': {
+                'model': 'ir.model.data',
+                'table': 'ir_model_data',
+                'requires': ['database', 'value'],
+                'call': set_value,
+            },
+        },
     },
     'show': {
         'users': {
