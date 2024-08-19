@@ -4,7 +4,7 @@
 #   watch.view: to watch file when changed and update related view
 #   send.scancode: to simulate code scanning
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 __author__ = "Filippo Iovine <filippo.jovine@gmail.com>"
 __company__ = "ME&ONLYME"
 
